@@ -206,6 +206,7 @@ def _run_chess_move_pipeline(
             elo_base=int(difficulty_cfg.get("elo_base", 1800)),
             elo_cpl_scale=float(difficulty_cfg.get("elo_cpl_scale", 4.0)),
             elo_confidence_cap=float(difficulty_cfg.get("elo_confidence_cap", 0.90)),
+            elo_confidence_power=float(difficulty_cfg.get("elo_confidence_power", 3.0)),
             soft_mode_ratio=float(difficulty_cfg.get("soft_mode_ratio", 0.70)),
             soft_mode_elo_offset=int(difficulty_cfg.get("soft_mode_elo_offset", 120)),
             parity_mode_elo_offset=int(difficulty_cfg.get("parity_mode_elo_offset", 20)),

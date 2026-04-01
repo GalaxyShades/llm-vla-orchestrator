@@ -32,7 +32,8 @@ class DifficultyController:
 
         confidence = min(
             float(self.config.elo_confidence_cap),
-            len(recent) / max(1, int(self.config.elo_window_moves)),
+            (len(recent) / max(1, int(self.config.elo_window_moves)))
+            ** float(self.config.elo_confidence_power),
         )
         blended = int(prior + confidence * (model_estimate - prior))
         return max(int(self.config.elo_min), min(int(self.config.elo_max), blended))

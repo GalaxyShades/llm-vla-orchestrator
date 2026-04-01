@@ -56,6 +56,7 @@ class DifficultyConfig:
     elo_base: int = 1800
     elo_cpl_scale: float = 4.0
     elo_confidence_cap: float = 0.90
+    elo_confidence_power: float = 3.0
     soft_mode_ratio: float = 0.70
     soft_mode_elo_offset: int = 120
     parity_mode_elo_offset: int = 20
