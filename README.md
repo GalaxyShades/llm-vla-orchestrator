@@ -2,45 +2,9 @@
 
 Minimal scaffold for a multimodal-LLM + VLA closed loop with sequential subtasks.
 
-## Pipeline modes
+## Pipeline mode
 
-The orchestrator supports two modes selected by `pipeline.type` in config:
-- `motion`: arm line-crossing simulation (existing behaviour)
-- `chess_turn`: directory-based chessboard observation with legal-move memory validation
-
-## ReAct orchestration model
-
-The orchestrator now uses an agent that can call exactly two tools:
-- `move_left`
-- `move_right`
-
-Execution order is strict and sequential across the task’s subtask list.
-Each subtask must be completed before the orchestrator proceeds to the next one.
-
-For each attempt inside a subtask:
-- Agent chooses one tool action
-- Motion chunk executes in environment (simulated VLA step)
-- Verifier checks completion from BEFORE/AFTER frames
-- If not complete, params may be adjusted and next attempt starts
-
-## Current simulation task
-
-Task: `arm_line_crossing`
-- Subtask 1: move right and cross white center line
-- Subtask 2: move left and cross white center line
-
-This is an example task. The orchestrator supports any number of subtasks and executes them in order.
-
-## What the verifier LLM sees
-
-Per verification call:
-- `BEFORE (before.png)`
-- `AFTER (after.png)`
-- instruction + success criteria + params
-- explicit scene mapping:
-  - black background
-  - white vertical center line (goal boundary)
-  - green rectangle (arm marker)
+The orchestrator is configured for `chess_move`: adaptive chess orchestration with legal transition checks and Stockfish-driven move policy.
 
 ## Install
 
@@ -78,87 +42,103 @@ git submodule update --remote openpi
 The recommended interpreter for this repo is:
 - `/home/lem/miniconda3/envs/llm-vla-orchestrator/bin/python`
 
-## Run with local rule-based ReAct agent + stub verifier
+## Run chess orchestration API
+
+Start the backend service:
 
 ```bash
-python -m orchestrator.run --config configs/line_crossing.yaml
+python -m orchestrator.run --config configs/chess_move.yaml --serve-api
 ```
 
-## Run with Azure ReAct agent + Azure vision verifier
+This launches FastAPI on `http://127.0.0.1:8000` with:
+- `POST /api/player/analyse`: analyse and process a player's completed move
+- `POST /api/reset`: reset game state
+- `GET /api/state`: current game state, pending-warning state, and per-game UI cache
+- `POST /api/ui/state`: persist frontend UI cache (events, last result, timers) for the active game
+- `WS /ws/events`: live event stream
 
-Create a `.env` file in repo root:
+The backend uses camera-based analysis and ChatGPT vision to infer SAN from `before_fen` + after-move image.
+
+Camera input source is configurable in `configs/chess_move.yaml`:
+- `chess.camera.input_mode: filesystem` uses `chess.camera.inbox_dir/current_filename`
+- `chess.camera.input_mode: ui_render` uses the rendered Chess Camera snapshot sent by the frontend UI
+
+Policy-agent config resolution:
+- `chess.orchestrator_agent.model` falls back to `AZURE_AGENT_DEPLOYMENT`
+- `chess.orchestrator_agent.api_key` falls back to `AZURE_AGENT_API_KEY`
+- `chess.orchestrator_agent.base_url` falls back to `AZURE_AGENT_ENDPOINT` (converted to `/openai/v1`)
+- `chess.orchestrator_agent.api_version` falls back to `AZURE_AGENT_API_VERSION`
+- `chess.orchestrator_agent.azure_endpoint` falls back to `AZURE_AGENT_ENDPOINT`
+
+Vision config resolution:
+- `chess.vision.model` falls back to `AZURE_VISION_DEPLOYMENT`
+- `chess.vision.api_key` falls back to `AZURE_VISION_API_KEY`
+- `chess.vision.base_url` falls back to `AZURE_VISION_ENDPOINT` (converted to `/openai/v1`)
+- `chess.vision.api_version` falls back to `AZURE_VISION_API_VERSION`
+- `chess.vision.azure_endpoint` falls back to `AZURE_VISION_ENDPOINT`
+
+For one-shot CLI debugging (without UI):
 
 ```bash
-AZURE_AGENT_DEPLOYMENT=your_azure_agent_deployment
-AZURE_VISION_DEPLOYMENT=your_azure_vision_deployment
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
-AZURE_OPENAI_API_VERSION=
-LANGSMITH_API_KEY=...
-LANGSMITH_PROJECT=llm-vla-orchestrator
+python -m orchestrator.run \
+  --config configs/chess_move.yaml \
+  --observed-piece-placement "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
 ```
 
-Set deployment names in `configs/line_crossing_azure.yaml`, then run:
+To reset state before a run:
 
 ```bash
-python -m orchestrator.run --config configs/line_crossing_azure.yaml
+python -m orchestrator.run --config configs/chess_move.yaml --reset-game-state
 ```
 
-## Run chess turn pipeline (directory camera + chess memory)
+The chess pipeline now:
+- validates observed board transitions with `python-chess`
+- assumes legal player intent and infers the most likely legal transition when observation is inconsistent
+- estimates player strength using a rolling move window
+- selects AI responses with Stockfish under adaptive difficulty policy
+- logs per-move policy context, engine candidates, and execution records
 
-`chess_turn` mode expects one current image in:
-- `data/chess_camera/inbox/current.jpg`
+### Backend module layout
 
-Run:
+- `orchestrator/game_service.py`: end-to-end move orchestration flow
+- `orchestrator/vision_agent.py`: ChatGPT vision SAN move extraction
+- `orchestrator/engine_service.py`: Stockfish analysis and candidate generation
+- `orchestrator/policy_agent.py`: `ChessOrchestratorAgent` LangChain tool-calling move policy
+- `orchestrator/difficulty.py`: player Elo estimation and policy targets
+- `orchestrator/executor.py`: Pi Zero execution adapter
+- `orchestrator/game_state.py`: persistent game state store
+- `orchestrator/game_logger.py`: per-move artefacts and JSONL/PGN logging
+- `orchestrator/camera.py`: directory-based camera image source
+- `orchestrator/chess_types.py`: shared dataclasses used across modules
+
+### Frontend UI (React)
+
+The frontend lives in `frontend/` and uses `react-chessboard` + `chess.js`.
 
 ```bash
-python -m orchestrator.run --config configs/chess_turn.yaml
+cd frontend
+npm install
+npm run dev
 ```
 
-Default behaviour is to persist and append chess memory across runs.
-To reset state before a run, use either:
-
-```bash
-python -m orchestrator.run --config configs/chess_turn.yaml --reset-game-state
-```
-
-or set `chess.memory.reset_on_start: true` in config.
-
-To add a note for a specific turn run:
-
-```bash
-python -m orchestrator.run --config configs/chess_turn.yaml --turn-note "White testing kingside pressure."
-```
-
-The chess pipeline will:
-- run `chesscog` inference on the current image
-- extract piece placement
-- compare with previous canonical state
-- accept only legal one-move transitions
-- persist game memory and move logs
-- store extensible memory structures (`notes`, `journal`, `events`, `stats`, `metadata`) for future reasoning/validation agents
-
-Render board images from a run:
-
-```bash
-python -m orchestrator.render_chess_boards --run-dir runs/<timestamp>
-```
-
-This writes SVG board renders to `runs/<timestamp>/boards/`.
+UI controls:
+- `Start Game` / `Reset Game`
+- Drag-and-drop legal player moves (move completion auto-triggers analysis)
+- `Player View` / `Chess Camera` toggle controls which board rendering is captured and sent for analysis logging
 
 ### Important caveat about FEN
 
-A single image can provide piece placement, but it cannot reliably provide full game-state fields
-(`side_to_move`, castling rights, en-passant target, halfmove clock, fullmove number).
-The pipeline therefore stores canonical game state from move history and can optionally emit a
-synthetic full FEN with configurable defaults for downstream tools.
+The camera path uses the canonical pre-move FEN from game memory plus the after-move image,
+then asks vision for SAN move notation.
+This avoids reconstructing full FEN fields directly from an image and keeps legal-state handling
+anchored to `python-chess` move validation.
 
 `api_version` is optional in this code.
-- If set, the code uses the Azure API-versioned client.
-- If blank, the code uses Azure OpenAI v1-style base URL mode.
-If your Azure setup requires API-versioned requests, set either:
-- `agent.api_version` / `verifier.api_version` in config, or
-- `AZURE_OPENAI_API_VERSION` in `.env`.
+- If `api_version` is set (agent or vision), the code uses `AzureChatOpenAI` with `azure_endpoint` and `api_version`.
+- If `api_version` is blank, the code uses `ChatOpenAI` in Azure OpenAI v1-style `base_url` mode.
+Use separate env vars for each client:
+- `AZURE_AGENT_API_KEY`, `AZURE_AGENT_ENDPOINT`, `AZURE_AGENT_API_VERSION`
+- `AZURE_VISION_API_KEY`, `AZURE_VISION_ENDPOINT`, `AZURE_VISION_API_VERSION`
 
 ## LangSmith tracing
 
@@ -176,23 +156,19 @@ LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 ```
 
 When enabled, traces include:
-- top-level orchestrator task/subtask runs
-- agent decision runs
-- motion chunk execution
-- verifier calls
+- chess orchestration decisions
+- vision analysis calls
+- Stockfish evaluation and move selection
 - Azure OpenAI API calls (via wrapped client)
 
 ## Output artifacts
 
-Each run writes to `runs/YYYYMMDD_HHMMSS_microseconds/`:
-- `steps.jsonl` (one JSON record per attempt, including timestamps, params, execution summary, verifier result, and image paths)
-- `images/<subtask>/attempt_<n>_a.png`
-- `images/<subtask>/attempt_<n>_b.png`
+Each chess game writes:
+- `games/<game_date_time>/moves.jsonl` (one file per game)
+- `games/<game_date_time>/game.pgn` (one PGN per game)
+- `games/<game_date_time>/moves/move_XXX/move_XXX_pre.png`
+- `games/<game_date_time>/moves/move_XXX/move_XXX_observed.png`
+- `games/<game_date_time>/moves/move_XXX/move_XXX_post.png`
+- `games/<game_date_time>/moves/move_XXX/move_XXX_<source>.png` (camera snapshot used for analysis)
 
-Naming convention:
-- `_a.png`: frame before the action chunk
-- `_b.png`: frame after the action chunk
-
-In `chess_turn` mode, each run writes:
-- `turns.jsonl` (turn-level machine-friendly memory records)
-- `game.pgn` (human-readable chess game history)
+Each completed player move writes to its own directory: `moves/move_001`, `moves/move_002`, and so on.

@@ -1,8 +1,12 @@
 chess>=1.11.2
-chesscog @ git+https://github.com/georg-wolflein/chesscog.git@4e9c22d76c75615d4e9a4cd567679f4caa00dec7
+fastapi>=0.115.0
+langchain>=0.3.28
+langchain-openai>=0.3.35
 langsmith>=0.3.16
 numpy==1.26.4
 openai==2.21.0
 Pillow>=8.3.1,<9.0.0
+pydantic>=2.10.0
 PyYAML>=6.0
 scipy==1.10.1
+uvicorn>=0.34.0

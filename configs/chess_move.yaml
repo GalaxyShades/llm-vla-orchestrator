@@ -1,0 +1,71 @@
+# Chess orchestration mode selector.
+pipeline:
+  type: chess_move
+
+# Shared run artefact directory.
+run_dir: games
+
+chess:
+  # Player side colour.
+  player_colour: white
+  # Assume the player intends legal moves; infer likely legal transition when needed.
+  assume_legal_player: true
+
+  # Camera input backend (used in API real_camera mode).
+  camera:
+    # image source for real_camera mode: filesystem | ui_render
+    input_mode: ui_render
+    inbox_dir: data/chess_camera/inbox
+    current_filename: camera_capture.jpg
+
+  # Persistent game memory.
+  memory:
+    state_path: data/chess_camera/state/game_state.json
+    initial_fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+    reset_on_start: false
+
+  # ChatGPT vision configuration for SAN move extraction from before_fen + after image.
+  vision:
+    model: ""
+    api_key: ""
+    base_url: ""
+    azure_endpoint: ""
+    api_version: ""
+    max_retries: 1
+    illegal_retry_attempts: 3
+
+  # Local Stockfish engine settings.
+  engine:
+    path: /usr/games/stockfish
+    think_time_s: 10.0
+    multipv: 8
+
+  # Adaptive difficulty policy.
+  difficulty:
+    target_player_win_rate: 0.70
+    elo_window_moves: 12
+    elo_prior: 1000
+    elo_min: 700
+    elo_max: 2200
+    elo_base: 1800
+    elo_cpl_scale: 4.0
+    elo_confidence_cap: 0.90
+    soft_mode_ratio: 0.70
+    soft_mode_elo_offset: 120
+    parity_mode_elo_offset: 20
+    max_forced_blunder_cp: 180
+    allow_conversion_after_player_blunder_cp: 250
+    strong_play_avg_cpl_threshold: 40
+    strong_play_min_moves: 3
+    close_game_eval_window_cp: 120
+
+  # Agent that chooses one move from top engine candidates using game context.
+  orchestrator_agent:
+    model: ""
+    api_key: ""
+    base_url: ""
+    azure_endpoint: ""
+    api_version: ""
+    max_retries: 2
+    candidate_count: 5
+    objective_prompt: "Train the player with close games while keeping target win-rate balance."

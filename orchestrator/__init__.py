@@ -1,12 +1,7 @@
-from orchestrator.agent import AzureReActTaskAgent, RuleBasedTaskAgent
-from orchestrator.core import Orchestrator
-from orchestrator.specs import SubtaskSpec, TaskSpec, VerifyResult
+from orchestrator.game_service import ChessGameService
+from orchestrator.policy_agent import ChessOrchestratorAgent
 
 __all__ = [
-    "Orchestrator",
-    "SubtaskSpec",
-    "TaskSpec",
-    "VerifyResult",
-    "RuleBasedTaskAgent",
-    "AzureReActTaskAgent",
+    "ChessGameService",
+    "ChessOrchestratorAgent",
 ]

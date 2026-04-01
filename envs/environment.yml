@@ -10,7 +10,8 @@ dependencies:
   - pyyaml>=6,<7
   - pip:
       - chess==1.11.2
+      - langchain>=0.3.28
+      - langchain-openai>=0.3.35
       - langsmith>=0.3.16
       - openai==2.21.0
       - scipy==1.10.1
-      - "chesscog @ git+https://github.com/georg-wolflein/chesscog.git@4e9c22d76c75615d4e9a4cd567679f4caa00dec7"

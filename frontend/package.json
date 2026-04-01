@@ -1,0 +1,30 @@
+{
+  "name": "llm-vla-chess-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@cocos/fbx2gltf": "^1.0.8",
+    "@gltf-transform/cli": "^4.3.0",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.17.14",
+    "chess.js": "^1.4.0",
+    "fbx2gltf": "^0.9.7-p1",
+    "html2canvas": "^1.4.1",
+    "node-unrar-js": "^2.0.2",
+    "react": "^18.3.1",
+    "react-chessboard": "^4.7.3",
+    "react-dom": "^18.3.1",
+    "three": "^0.161.0",
+    "unrar-js": "^0.2.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.10"
+  }
+}

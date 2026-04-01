@@ -1,28 +1,24 @@
-"""Entrypoint for running either motion or chess orchestration pipelines."""
+"""Entrypoint for running chess move orchestration pipelines."""
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from envs.mock_env import MockEnv
-from orchestrator.agent import AzureReActTaskAgent, RuleBasedTaskAgent
-from orchestrator.chess_pipeline import (
-    ChessMemoryStore,
-    ChessTurnLogger,
-    ChessTurnPipeline,
-    ChesscogCliRecognizer,
-    DirectoryCamera,
-)
-from orchestrator.core import Orchestrator
-from orchestrator.logger import RunLogger
-from orchestrator.specs import SubtaskSpec, TaskSpec
-from verifier.azure_chatgpt import AzureChatGPTVisionVerifier
-from verifier.stub import StubVerifier
+from orchestrator.game_service import ChessGameService
+from orchestrator.chess_types import DifficultyConfig
+from orchestrator.difficulty import DifficultyController
+from orchestrator.engine_service import StockfishService
+from orchestrator.executor import PiZeroExecutor
+from orchestrator.game_logger import ChessMoveLogger
+from orchestrator.game_state import ChessMemoryStore
+from orchestrator.policy_agent import ChessOrchestratorAgent
+from orchestrator.web_app import create_app
 
 
 def load_config(path: str) -> dict[str, Any]:
@@ -59,6 +55,8 @@ def apply_langsmith_settings(cfg: dict[str, Any]) -> None:
     enabled = ls_cfg.get("enabled")
     if enabled is not None:
         os.environ["LANGSMITH_TRACING"] = "true" if bool(enabled) else "false"
+    else:
+        os.environ.setdefault("LANGSMITH_TRACING", "true")
 
     project = ls_cfg.get("project")
     if project:
@@ -72,174 +70,114 @@ def apply_langsmith_settings(cfg: dict[str, Any]) -> None:
     if endpoint:
         os.environ.setdefault("LANGSMITH_ENDPOINT", str(endpoint))
 
+    # Preserve explicit env overrides when already set by caller.
 
-def build_task_spec(cfg: dict[str, Any]) -> TaskSpec:
-    task_cfg = cfg["task"]
-    subtasks: list[SubtaskSpec] = []
 
-    for item in task_cfg.get("subtasks", []):
-        subtasks.append(
-            SubtaskSpec(
-                name=item["name"],
-                instruction=item["instruction"],
-                success_criteria=item["success_criteria"],
-                params=dict(item.get("params", {})),
-                max_attempts=int(item.get("max_attempts", 10)),
-                max_attempt_seconds=float(item.get("max_attempt_seconds", 10.0)),
-            )
-        )
-
-    return TaskSpec(name=task_cfg["name"], subtasks=subtasks)
+def _resolve_base_url(*, configured: str, azure_endpoint_env: str) -> str:
+    if configured.strip():
+        return configured.strip()
+    endpoint = azure_endpoint_env.strip().rstrip("/")
+    if not endpoint:
+        return ""
+    if endpoint.endswith("/openai/v1"):
+        return endpoint
+    return f"{endpoint}/openai/v1"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run task orchestration pipeline")
     parser.add_argument(
         "--config",
-        default="configs/line_crossing.yaml",
+        default="configs/chess_move.yaml",
         help="Path to YAML config",
     )
     parser.add_argument(
         "--reset-game-state",
         action="store_true",
-        help="Reset chess game state before running chess_turn pipeline.",
+        help="Reset chess game state before running chess_move pipeline.",
     )
     parser.add_argument(
-        "--turn-note",
+        "--move-note",
         default="",
-        help="Optional note attached to this chess turn and stored in memory.",
+        help="Optional note attached to this chess move and stored in memory.",
+    )
+    parser.add_argument(
+        "--observed-piece-placement",
+        default="",
+        help="Board-FEN piece placement after the player's move (simulated mode).",
+    )
+    parser.add_argument(
+        "--player-time-s",
+        type=float,
+        default=None,
+        help="Player move time in seconds for this move.",
+    )
+    parser.add_argument(
+        "--override-illegal",
+        action="store_true",
+        help="Override illegal transition check for this move.",
+    )
+    parser.add_argument(
+        "--serve-api",
+        action="store_true",
+        help="Run the FastAPI chess service instead of one-shot pipeline execution.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host for --serve-api mode.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for --serve-api mode.",
     )
     return parser.parse_args()
 
 
-def build_verifier(cfg: dict[str, Any]) -> Any:
-    verifier_cfg = cfg.get("verifier", {})
-    verifier_type = str(verifier_cfg.get("type", "stub")).lower()
-
-    if verifier_type == "stub":
-        return StubVerifier(
-            crossing_margin_px=int(verifier_cfg.get("crossing_margin_px", 4)),
-        )
-
-    if verifier_type == "azure_chatgpt":
-        deployment_cfg = str(verifier_cfg.get("deployment") or "").strip()
-        if deployment_cfg.startswith("your_"):
-            deployment_cfg = ""
-        deployment = str(deployment_cfg or os.getenv("AZURE_VISION_DEPLOYMENT") or "").strip()
-        if not deployment:
-            raise ValueError(
-                "verifier.deployment is required when verifier.type=azure_chatgpt "
-                "(or set AZURE_VISION_DEPLOYMENT in .env)"
-            )
-        return AzureChatGPTVisionVerifier(
-            deployment=deployment,
-            api_key=verifier_cfg.get("api_key"),
-            api_version=verifier_cfg.get("api_version"),
-            endpoint=verifier_cfg.get("endpoint"),
-            timeout_s=float(verifier_cfg.get("timeout_s", 30.0)),
-        )
-
-    raise ValueError(f"Unsupported verifier type: {verifier_type}")
-
-
-def build_task_agent(cfg: dict[str, Any]) -> Any:
-    agent_cfg = cfg.get("agent", {})
-    agent_type = str(agent_cfg.get("type", "rule_based")).lower()
-
-    if agent_type == "rule_based":
-        return RuleBasedTaskAgent()
-
-    if agent_type == "azure_react":
-        deployment_cfg = str(agent_cfg.get("deployment") or "").strip()
-        if deployment_cfg.startswith("your_"):
-            deployment_cfg = ""
-        deployment = str(deployment_cfg or os.getenv("AZURE_AGENT_DEPLOYMENT") or "").strip()
-        if not deployment:
-            raise ValueError(
-                "agent.deployment is required when agent.type=azure_react "
-                "(or set AZURE_AGENT_DEPLOYMENT in .env)"
-            )
-        return AzureReActTaskAgent(
-            deployment=deployment,
-            api_key=agent_cfg.get("api_key"),
-            api_version=agent_cfg.get("api_version"),
-            endpoint=agent_cfg.get("endpoint"),
-            timeout_s=float(agent_cfg.get("timeout_s", 30.0)),
-        )
-
-    raise ValueError(f"Unsupported agent type: {agent_type}")
-
-
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     args = parse_args()
     load_env_file(".env")
     cfg = load_config(args.config)
     apply_langsmith_settings(cfg)
 
-    pipeline_cfg = cfg.get("pipeline", {})
-    pipeline_type = str(pipeline_cfg.get("type", "motion")).lower()
-    if pipeline_type == "chess_turn":
-        _run_chess_turn_pipeline(
-            cfg,
-            reset_game_state=bool(args.reset_game_state),
-            turn_note=str(args.turn_note or "").strip() or None,
-        )
+    if args.serve_api:
+        import uvicorn
+
+        app = create_app(config_path=args.config)
+        uvicorn.run(app, host=args.host, port=args.port)
         return
 
-    control_hz = int(cfg.get("control_hz", 50))
-    env_cfg = cfg.get("env", {})
-    run_dir = str(cfg.get("run_dir", "runs"))
-    verbose = bool(cfg.get("verbose", False))
-
-    env = MockEnv(
-        control_hz=control_hz,
-        arm_limit=float(env_cfg.get("arm_limit", 1.0)),
-    )
-    verifier = build_verifier(cfg)
-    task_agent = build_task_agent(cfg)
-    logger = RunLogger(base_dir=run_dir)
-
-    orchestrator = Orchestrator(
-        env=env,
-        verifier=verifier,
-        logger=logger,
-        control_hz=control_hz,
-        task_agent=task_agent,
-        verbose=verbose,
+    _run_chess_move_pipeline(
+        cfg,
+        reset_game_state=bool(args.reset_game_state),
+        move_note=str(args.move_note or "").strip() or None,
+        observed_piece_placement=str(args.observed_piece_placement or "").strip() or None,
+        player_time_s=args.player_time_s,
+        override_illegal=bool(args.override_illegal),
     )
 
-    task = build_task_spec(cfg)
-    episode = orchestrator.run_task(task)
-    env.close()
 
-    print(f"Task: {episode['task_name']}")
-    print(f"Status: {episode['status']}")
-    print(f"Run directory: {episode['run_dir']}")
-    print(f"Steps log: {episode['steps_log']}")
-
-
-def _run_chess_turn_pipeline(
+def _run_chess_move_pipeline(
     cfg: dict[str, Any],
     *,
     reset_game_state: bool = False,
-    turn_note: str | None = None,
+    move_note: str | None = None,
+    observed_piece_placement: str | None = None,
+    player_time_s: float | None = None,
+    override_illegal: bool = False,
 ) -> None:
-    run_dir = str(cfg.get("run_dir", "runs"))
+    run_dir = str(cfg.get("run_dir", "games"))
     chess_cfg = cfg.get("chess", {})
-    retries_cfg = cfg.get("retries", {})
-    camera_cfg = chess_cfg.get("camera", {})
     memory_cfg = chess_cfg.get("memory", {})
-    recogniser_cfg = chess_cfg.get("recogniser", {})
+    difficulty_cfg = chess_cfg.get("difficulty", {})
+    engine_cfg = chess_cfg.get("engine", {})
 
-    camera = DirectoryCamera(
-        inbox_dir=str(camera_cfg.get("inbox_dir", "data/chess_camera/inbox")),
-        current_filename=str(camera_cfg.get("current_filename", "current.jpg")),
-    )
-    recogniser = ChesscogCliRecognizer(
-        python_executable=str(recogniser_cfg.get("python_executable", "python")),
-        module=str(recogniser_cfg.get("module", "chesscog.recognition.recognition")),
-        assume_white_bottom=bool(recogniser_cfg.get("assume_white_bottom", True)),
-    )
     memory_store = ChessMemoryStore(
         state_path=str(memory_cfg.get("state_path", "data/chess_camera/state/game_state.json")),
         initial_fen=str(
@@ -252,32 +190,108 @@ def _run_chess_turn_pipeline(
     if bool(memory_cfg.get("reset_on_start", False)) or reset_game_state:
         reset_reason = "cli_flag" if reset_game_state else "config_reset_on_start"
         memory_store.reset(reason=reset_reason)
-    logger = ChessTurnLogger(base_dir=run_dir)
+    logger = ChessMoveLogger(base_dir=run_dir)
+    stockfish_service = StockfishService(
+        engine_path=str(engine_cfg.get("path", "stockfish")),
+        think_time_s=float(engine_cfg.get("think_time_s", 10.0)),
+        multipv=int(engine_cfg.get("multipv", 8)),
+    )
+    difficulty_controller = DifficultyController(
+        DifficultyConfig(
+            target_player_win_rate=float(difficulty_cfg.get("target_player_win_rate", 0.70)),
+            elo_window_moves=int(difficulty_cfg.get("elo_window_moves", 12)),
+            elo_prior=int(difficulty_cfg.get("elo_prior", 1000)),
+            elo_min=int(difficulty_cfg.get("elo_min", 700)),
+            elo_max=int(difficulty_cfg.get("elo_max", 2200)),
+            elo_base=int(difficulty_cfg.get("elo_base", 1800)),
+            elo_cpl_scale=float(difficulty_cfg.get("elo_cpl_scale", 4.0)),
+            elo_confidence_cap=float(difficulty_cfg.get("elo_confidence_cap", 0.90)),
+            soft_mode_ratio=float(difficulty_cfg.get("soft_mode_ratio", 0.70)),
+            soft_mode_elo_offset=int(difficulty_cfg.get("soft_mode_elo_offset", 120)),
+            parity_mode_elo_offset=int(difficulty_cfg.get("parity_mode_elo_offset", 20)),
+            max_forced_blunder_cp=int(difficulty_cfg.get("max_forced_blunder_cp", 180)),
+            allow_conversion_after_player_blunder_cp=int(
+                difficulty_cfg.get("allow_conversion_after_player_blunder_cp", 250)
+            ),
+            strong_play_avg_cpl_threshold=int(
+                difficulty_cfg.get("strong_play_avg_cpl_threshold", 40)
+            ),
+            strong_play_min_moves=int(difficulty_cfg.get("strong_play_min_moves", 3)),
+            close_game_eval_window_cp=int(difficulty_cfg.get("close_game_eval_window_cp", 120)),
+        )
+    )
+    orchestrator_agent_cfg = dict(chess_cfg.get("orchestrator_agent", {}))
+    orchestrator_model = (
+        str(orchestrator_agent_cfg.get("model", "")).strip()
+        or os.getenv("AZURE_AGENT_DEPLOYMENT", "").strip()
+    )
+    orchestrator_api_key = (
+        str(orchestrator_agent_cfg.get("api_key", "")).strip()
+        or os.getenv("AZURE_AGENT_API_KEY", "").strip()
+    )
+    orchestrator_base_url = _resolve_base_url(
+        configured=str(orchestrator_agent_cfg.get("base_url", "")),
+        azure_endpoint_env=os.getenv("AZURE_AGENT_ENDPOINT", "").strip(),
+    )
+    orchestrator_api_version = (
+        str(orchestrator_agent_cfg.get("api_version", "")).strip()
+        or os.getenv("AZURE_AGENT_API_VERSION", "").strip()
+    )
+    orchestrator_azure_endpoint = (
+        str(orchestrator_agent_cfg.get("azure_endpoint", "")).strip()
+        or os.getenv("AZURE_AGENT_ENDPOINT", "").strip()
+    )
+    chess_orchestrator_agent = ChessOrchestratorAgent(
+        candidate_count=int(orchestrator_agent_cfg.get("candidate_count", 5)),
+        objective_prompt=str(
+            orchestrator_agent_cfg.get(
+                "objective_prompt",
+                "Make the game competitive and instructive while keeping player win chance near target.",
+            )
+        ),
+        model=orchestrator_model,
+        api_key=orchestrator_api_key,
+        base_url=orchestrator_base_url or None,
+        api_version=orchestrator_api_version or None,
+        azure_endpoint=orchestrator_azure_endpoint or None,
+        max_retries=int(orchestrator_agent_cfg.get("max_retries", 2)),
+    )
 
-    pipeline = ChessTurnPipeline(
-        camera=camera,
-        recogniser=recogniser,
+    pipeline = ChessGameService(
         memory_store=memory_store,
         logger=logger,
-        max_vision_retries_per_turn=int(retries_cfg.get("max_vision_retries_per_turn", 3)),
-        legal_match_min_confidence=float(chess_cfg.get("legal_match_min_confidence", 0.75)),
-        emit_full_fen=bool(chess_cfg.get("emit_full_fen", True)),
-        full_fen_defaults=dict(chess_cfg.get("full_fen_defaults", {})),
-        max_execution_retries_per_turn=int(retries_cfg.get("max_execution_retries_per_turn", 3)),
-        turn_note=turn_note or str(memory_cfg.get("turn_note", "")).strip() or None,
+        stockfish_service=stockfish_service,
+        chess_orchestrator_agent=chess_orchestrator_agent,
+        difficulty_controller=difficulty_controller,
+        executor=PiZeroExecutor(),
+        player_colour=str(chess_cfg.get("player_colour", "white")),
     )
-    result = pipeline.run_turn()
 
-    print("Pipeline: chess_turn")
+    if not observed_piece_placement:
+        raise ValueError(
+            "--observed-piece-placement is required for one-shot chess_move execution. "
+            "Use --serve-api for full UI mode."
+        )
+    del move_note
+    result = pipeline.move(
+        observed_piece_placement=observed_piece_placement,
+        player_time_s=player_time_s,
+        override_illegal=override_illegal,
+        source="simulated",
+        vision_attempts_used=1,
+    )
+
+    print("Pipeline: chess_move")
     print(f"Status: {result['status']}")
-    print(f"Turn index: {result['turn_index']}")
+    print(f"Move index: {result['move_index']}")
     print(f"Run directory: {result['run_dir']}")
-    print(f"Turns log: {result['turns_log']}")
+    print(f"Moves log: {result['moves_log']}")
     print(f"PGN path: {result['pgn_path']}")
-    if result["selected_move_uci"]:
-        print(f"Detected move (UCI): {result['selected_move_uci']}")
+    if result["player_move_uci"]:
+        print(f"Detected player move (UCI): {result['player_move_uci']}")
     else:
-        print("Detected move (UCI): none")
+        print("Detected player move (UCI): none")
+    print(f"Selected AI move (UCI): {result['ai_move_uci']}")
 
 
 if __name__ == "__main__":
