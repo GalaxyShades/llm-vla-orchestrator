@@ -1,0 +1,8 @@
+# Calibrated Cobot Magic joint targets for chess-board squares.
+#
+# Each square maps to a 7D joint target:
+# [joint0, joint1, joint2, joint3, joint4, joint5, gripper]
+#
+# Replace these placeholders with measured poses before enabling:
+# chess.execution.type: cobot
+squares: {}

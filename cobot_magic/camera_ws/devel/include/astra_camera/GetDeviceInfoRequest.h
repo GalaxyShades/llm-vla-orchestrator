@@ -1,0 +1,1 @@
+/home/agliex/cobot_magic/camera_ws/devel/.private/astra_camera/include/astra_camera/GetDeviceInfoRequest.h

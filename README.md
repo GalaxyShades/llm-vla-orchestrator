@@ -33,12 +33,6 @@ Install a new package ad hoc (without editing `requirements.txt` yet):
 python -m pip install <package-name>
 ```
 
-If you need to pull the latest `openpi` submodule commit, run:
-
-```bash
-git submodule update --remote openpi
-```
-
 The recommended interpreter for this repo is:
 - `/home/lem/miniconda3/envs/llm-vla-orchestrator/bin/python`
 
@@ -47,7 +41,9 @@ The recommended interpreter for this repo is:
 Start the backend service:
 
 ```bash
-python -m orchestrator.run --config configs/chess_move.yaml --serve-api
+/home/lem/miniconda3/envs/llm-vla-orchestrator/bin/python -m orchestrator.run \
+  --config configs/chess_move.yaml \
+  --serve-api
 ```
 
 This launches FastAPI on `http://127.0.0.1:8000` with:
@@ -84,7 +80,7 @@ Vision config resolution:
 For one-shot CLI debugging (without UI):
 
 ```bash
-python -m orchestrator.run \
+/home/lem/miniconda3/envs/llm-vla-orchestrator/bin/python -m orchestrator.run \
   --config configs/chess_move.yaml \
   --observed-piece-placement "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
 ```
@@ -92,8 +88,54 @@ python -m orchestrator.run \
 To reset state before a run:
 
 ```bash
-python -m orchestrator.run --config configs/chess_move.yaml --reset-game-state
+/home/lem/miniconda3/envs/llm-vla-orchestrator/bin/python -m orchestrator.run \
+  --config configs/chess_move.yaml \
+  --reset-game-state
 ```
+
+## Hardware execution
+
+The chess pipeline calls `executor.execute_move(<uci>)` after selecting the AI
+move. Execution is configured in `configs/chess_move.yaml` under
+`chess.execution`.
+
+Default dry-run mode:
+
+```yaml
+chess:
+  execution:
+    type: dry_run
+```
+
+This logs text such as `Move piece from e2 to e4` and does not move hardware.
+
+To enable Cobot Magic execution, first calibrate board-square joint targets in
+`configs/cobot_chess_square_poses.yaml`, then switch:
+
+```yaml
+chess:
+  execution:
+    type: cobot
+    cobot_module_path: cobot_magic/mobile_aloha_AgileX
+    square_poses_path: configs/cobot_chess_square_poses.yaml
+    active_arm: left
+    move_method: continuous
+```
+
+The square-pose file expects 7D joint targets:
+
+```yaml
+squares:
+  e2: [joint0, joint1, joint2, joint3, joint4, joint5, gripper]
+  e4: [joint0, joint1, joint2, joint3, joint4, joint5, gripper]
+```
+
+With `type: cobot`, a selected move like `e2e4` is translated into the
+calibrated `e2` pose followed by the calibrated `e4` pose and published through
+Cobot Magic's ROS bridge.
+
+For ROS, CAN, and Piper launch instructions, see
+[cobot_magic/README.md](cobot_magic/README.md).
 
 The chess pipeline now:
 - validates observed board transitions with `python-chess`
@@ -109,7 +151,7 @@ The chess pipeline now:
 - `orchestrator/engine_service.py`: Stockfish analysis and candidate generation
 - `orchestrator/policy_agent.py`: `ChessOrchestratorAgent` LangChain tool-calling move policy
 - `orchestrator/difficulty.py`: player Elo estimation and policy targets
-- `orchestrator/executor.py`: Pi Zero execution adapter
+- `orchestrator/executor.py`: dry-run and Cobot Magic execution adapters
 - `orchestrator/game_state.py`: persistent game state store
 - `orchestrator/game_logger.py`: per-move artefacts and JSONL/PGN logging
 - `orchestrator/camera.py`: directory-based camera image source

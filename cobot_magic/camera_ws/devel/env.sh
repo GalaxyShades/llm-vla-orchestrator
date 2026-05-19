@@ -1,0 +1,1 @@
+/home/agliex/cobot_magic/camera_ws/devel/.private/catkin_tools_prebuild/env.sh

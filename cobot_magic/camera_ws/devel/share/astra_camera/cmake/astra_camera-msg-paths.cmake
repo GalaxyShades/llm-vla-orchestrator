@@ -1,0 +1,1 @@
+/home/agliex/cobot_magic/camera_ws/devel/.private/astra_camera/share/astra_camera/cmake/astra_camera-msg-paths.cmake

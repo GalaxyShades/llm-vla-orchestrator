@@ -20,7 +20,7 @@ from orchestrator.camera import DirectoryCamera
 from orchestrator.chess_types import DifficultyConfig
 from orchestrator.difficulty import DifficultyController
 from orchestrator.engine_service import StockfishService
-from orchestrator.executor import PiZeroExecutor
+from orchestrator.executor import build_executor
 from orchestrator.game_logger import ChessMoveLogger
 from orchestrator.game_service import ChessGameService
 from orchestrator.game_state import ChessMemoryStore
@@ -286,6 +286,7 @@ def _build_pipeline(
     engine_cfg = dict(chess_cfg.get("engine", {}))
     difficulty_cfg = dict(chess_cfg.get("difficulty", {}))
     vision_cfg = dict(chess_cfg.get("vision", {}))
+    execution_cfg = dict(chess_cfg.get("execution", {}))
 
     memory_store = ChessMemoryStore(
         state_path=str(memory_cfg.get("state_path", "data/chess_camera/state/game_state.json")),
@@ -348,7 +349,7 @@ def _build_pipeline(
         stockfish_service=stockfish_service,
         chess_orchestrator_agent=chess_orchestrator_agent,
         difficulty_controller=difficulty_controller,
-        executor=PiZeroExecutor(),
+        executor=build_executor(execution_cfg),
         player_colour=str(chess_cfg.get("player_colour", "white")),
         assume_legal_player=bool(chess_cfg.get("assume_legal_player", True)),
     )

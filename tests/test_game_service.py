@@ -16,6 +16,7 @@ from orchestrator.chess_types import (
 )
 from orchestrator.difficulty import DifficultyController
 from orchestrator.executor import PiZeroExecutor
+from orchestrator.executor import build_executor
 from orchestrator.game_service import ChessGameService
 from orchestrator.game_logger import ChessMoveLogger
 from orchestrator.game_state import ChessMemoryStore
@@ -23,6 +24,8 @@ from orchestrator.game_state import ChessMemoryStore
 
 class FakeStockfishService:
     """Deterministic fake engine for fast and reproducible unit tests."""
+
+    multipv = 8
 
     def analyse_move_quality(self, board_before: chess.Board, move: chess.Move) -> PlayerMoveEvidence:
         return PlayerMoveEvidence(
@@ -68,7 +71,7 @@ class FakePolicyAgent:
         target_player_win_rate: float,
         allow_best_play: bool,
         player_move_evidence: dict[str, float] | None,
-        stats: dict[str, int],
+        stats: dict[str, int] | None = None,
     ) -> ChessOrchestratorDecision:
         del best_eval_cp
         del player_estimated_elo
@@ -105,6 +108,13 @@ def _build_pipeline(*, tmp_path: Path, initial_fen: str = chess.STARTING_FEN) ->
         executor=PiZeroExecutor(),
         player_colour="white",
     )
+
+
+def test_executor_factory_defaults_to_dry_run() -> None:
+    executor = build_executor({})
+
+    assert isinstance(executor, PiZeroExecutor)
+    assert executor.execute_move("e2e4") == (True, "Move piece from e2 to e4")
 
 
 def test_pipeline_accepts_legal_transition_and_updates_memory(tmp_path: Path) -> None:

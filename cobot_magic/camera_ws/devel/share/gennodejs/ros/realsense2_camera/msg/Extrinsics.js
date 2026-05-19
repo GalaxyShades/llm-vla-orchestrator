@@ -1,0 +1,1 @@
+/home/agliex/cobot_magic/camera_ws/devel/.private/realsense2_camera/share/gennodejs/ros/realsense2_camera/msg/Extrinsics.js

@@ -1,0 +1,4 @@
+piper
+/home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/.private/piper/lib/pkgconfig/piper.pc /home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/lib/pkgconfig/piper.pc
+/home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/.private/piper/share/piper/cmake/piperConfig-version.cmake /home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/share/piper/cmake/piperConfig-version.cmake
+/home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/.private/piper/share/piper/cmake/piperConfig.cmake /home/agliex/cobot_magic/Piper_ros_private-ros-noetic/devel/share/piper/cmake/piperConfig.cmake

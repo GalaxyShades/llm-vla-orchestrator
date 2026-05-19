@@ -1,0 +1,8 @@
+prefix=/home/agliex/cobot_magic/aloha_ws/devel
+
+Name: aloha
+Description: Description of aloha
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: interbotix_xs_msgs interbotix_xsarm_control rosbag roscpp tf2_ros rviz sensor_msgs std_msgs std_srvs

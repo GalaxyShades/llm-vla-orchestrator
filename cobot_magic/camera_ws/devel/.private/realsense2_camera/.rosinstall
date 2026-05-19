@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/agliex/cobot_magic/camera_ws/devel/.private/realsense2_camera/setup.sh

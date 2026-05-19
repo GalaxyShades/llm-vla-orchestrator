@@ -24,6 +24,18 @@ chess:
     initial_fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
     reset_on_start: false
 
+  # Hardware execution backend for the selected AI move.
+  execution:
+    # dry_run keeps the current text-only behaviour. Use cobot after calibrating square poses.
+    type: dry_run
+    cobot_module_path: cobot_magic/mobile_aloha_AgileX
+    square_poses_path: configs/cobot_chess_square_poses.yaml
+    active_arm: left
+    move_method: continuous
+    settle_s: 0.25
+    left_idle_pose: [-0.00133514404296875, 0.00209808349609375, 0.01583099365234375, -0.032616615295410156, -0.00286102294921875, 0.00095367431640625, 3.557830810546875]
+    right_idle_pose: [-0.00133514404296875, 0.00438690185546875, 0.034523963928222656, -0.053597450256347656, -0.00476837158203125, -0.00209808349609375, 3.557830810546875]
+
   # ChatGPT vision configuration for SAN move extraction from before_fen + after image.
   vision:
     model: "gpt-5.3-chat"
