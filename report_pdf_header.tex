@@ -1,0 +1,26 @@
+\usepackage{xurl}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage[normalem]{ulem}
+\AtBeginDocument{
+  \hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+  }
+  \let\oldhref\href
+  \renewcommand{\href}[2]{\oldhref{#1}{\uline{#2}}}
+  \let\oldurl\url
+  \renewcommand{\url}[1]{\oldhref{#1}{\uline{\nolinkurl{#1}}}}
+}
+\captionsetup[figure]{
+  position=bottom,
+  skip=8pt
+}
+\setkeys{Gin}{
+  keepaspectratio
+}
+\setlength{\emergencystretch}{3em}
+\sloppy

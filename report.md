@@ -1,5 +1,10 @@
 # Autonomous Robotic Chess Player via LLM-VLA Orchestration
 
+## Team Members
+
+Aaron Chris Dsouza (3036440892)
+Hui Lem (3035994004)
+
 ## Abstract
 
 This project implemented an autonomous chess-playing system built around a hierarchical perception, reasoning, and action architecture. The system combined chessboard perception, symbolic board-state validation, chess-engine analysis, LLM-based move selection, simulated camera input, frontend interaction, benchmark evaluation, and robotic manipulation through a Cobot Magic/Piper ROS execution adapter.
@@ -10,7 +15,7 @@ The corrected benchmark showed that the software architecture was functional, bu
 
 ## Repository Implementation
 
-Repository: https://github.com/GalaxyShades/llm-vla-orchestrator
+Repository: [https://github.com/GalaxyShades/llm-vla-orchestrator](https://github.com/GalaxyShades/llm-vla-orchestrator)
 
 The repository implements the software orchestration layer of the whole system. It contains the backend API, frontend interface, simulated chess-camera input, vision model integration, board-state validation, Stockfish candidate generation, LLM policy selection, persistent game memory, logging, and benchmark scripts.
 
@@ -51,7 +56,7 @@ The software subsystem handled frontend chess interaction, rendered 3D chessboar
 
 This subsystem converted visual board observations into validated symbolic chess states, then selected the system’s next move.
 
-The robotic subsystem handled physical chess-piece manipulation. The original direction was to train ACT-based action models for robotic manipulation. In practice, the trained models struggled to reliably learn the task and could get stuck midway. The final integration design therefore used a more deterministic Cobot Magic executor: a selected chess move such as `e2e4` is split into source and destination squares, each square is looked up in a calibrated pose table, and the executor publishes the corresponding 7D joint targets through the Cobot/Piper ROS bridge.
+The robotic subsystem handled physical chess-piece manipulation. The original direction was to train Pi-zero or ACT based action models for robotic manipulation. In practice, the trained models struggled to reliably learn the task and could get stuck midway. The final integration design therefore used a more deterministic Cobot Magic executor: a selected chess move such as `e2e4` is split into source and destination squares, each square is looked up in a calibrated pose table, and the executor publishes the corresponding 7D joint targets through the Cobot/Piper ROS bridge.
 
 This design still matched the overall architecture. The LLM did not directly control every motor action. Instead, it selected a legal chess move, and deterministic code translated that move into available robot poses. This made the action side more predictable than relying on a single general prompt-following VLA model.
 
@@ -86,6 +91,10 @@ Updated board state and game log
 The most important design decision was to separate the system into layers. Chess reasoning and robotic manipulation were not handled by a single model. Instead, the chess state was represented symbolically, chess legality was enforced deterministically, and the LLM was used where flexible decision-making or routing was useful.
 
 This modular design made the system more robust than a purely end-to-end approach. The chess engine ensured that candidate moves were legal and strategically meaningful. The LLM policy layer selected between those candidates. The robotic action layer then handled physical movement through calibrated Cobot Magic/Piper joint commands.
+
+## Hardware Setup for robotic manipulation
+
+The physical platform was a **Cobot Magic** system in a Mobile ALOHA configuration, equipped with dual **Agilex Piper** arms. Three **Intel RealSense** cameras provided visual input: one mounted on the left wrist, one on the right wrist, and one providing a top-down view of the board. Model training and inference were performed on a high-speed workstation with an **NVIDIA RTX 4090** GPU.
 
 ## Dataset and Data Collection
 
@@ -140,7 +149,7 @@ This reduced hallucination risk. The chess engine handled legality and move qual
 
 ### Robotic action model
 
-The robotic action model side originally explored ACT-based learning for chess-piece manipulation. The final system design used direct hardware execution. The orchestration layer converted a selected chess move into UCI notation, and the Cobot executor mapped the UCI source and destination squares to calibrated joint targets.
+The robotic action model side first explored Pi-zero VLA fine-tuning on 200 trajectories covering 20 chess moves. When Pi-zero failed to produce meaningful arm motion—likely due to configuration issues—a diagnostic box-picking task confirmed that ACT could actuate the arm while Pi-zero could not. We then shifted to specialised ACT models (one per move), but the only model trained before abandonment—a7-to-a5 on 60 trajectories—failed in all 10 trials due to piece-level visual confusion and insufficient data.
 
 The final execution plan was more deterministic than direct prompt-based robot control. Instead of expecting one robot model to understand every instruction, the system mapped move instructions to a finite set of calibrated physical locations.
 
@@ -192,7 +201,20 @@ The LLM policy agent received the shortlisted Stockfish moves and selected one a
 
 ## Robotic Manipulation and Hardware Execution
 
-The robotic manipulation subsystem was responsible for physically executing selected chess moves. The original plan was to train ACT models for robotic chess-piece manipulation. In testing, the models struggled to learn the task reliably and could get stuck midway. This was likely caused by the difficulty of collecting consistent robot data, sensitivity to configuration, and the precision required for chess-piece manipulation.
+We first fine-tuned Pi-zero on 200 trajectories covering 20 different chess moves (10 trajectories each). "The Pi-zero training pipeline followed these steps: (1) collect data on the Cobot Magic computer and transfer to the GPU workstation; (2) convert ALOHA data to LeRobot format with task prompts; (3) configure model and training hyperparameters; (4) compute normalisation statistics for the trajectories; and (5) fine-tune with batch size 16 for 60,000 iterations.
+
+The model barely moved the arm, producing only small, ineffective motions. To verify whether this was a configuration issue, we trained both Pi-zero and ACT on a simpler verification task—“pick chess piece and put into the box”—using 60 episodes. ACT completed the task in 2 out of 7 trials, showing it could at least actuate the arm, but failed to recover from wrong moves and did not generalise. Pi-zero again produced only small movements. Because ACT worked while Pi-zero did not on the same data and hardware, we concluded Pi-zero’s failure was due to configuration problems rather than insufficient data.
+
+We abandoned Pi-zero and moved to an ACT-based pipeline. However, ACT is less "intelligent" as it does not use a VLM backbone, and cannot take language input. Hence, we originally intended to use five specialised models, each of which performed only one move. However, only one model was trained before the approach was abandoned.
+
+Trained model: a7-to-a5 pawn move.
+Demonstrations: 60 trajectories.
+Success rate: 0/10 trials.
+Major failure modes: The arm reached the board but could not localise the correct starting square or differentiate between visually similar pawns. It frequently got stuck mid-trajectory and failed to complete the grasp-and-move sequence.
+
+Videos showing demos can be found in the [OneDrive demo folder](https://1drv.ms/f/c/58f782dd14efe21e/IgAITXQmKPqrR5i8UgzsNfbOAR1ktRQUZm10Ac8urdntaRM?e=eMjMIJ).
+
+We estimated that meaningful generalisation would require at least 200 trajectories per model. Collecting 200+ demonstrations for each of five distinct moves was deemed infeasible within the project timeline, so the remaining four models were not trained.
 
 The final execution design therefore used a more deterministic Cobot Magic strategy. The robot side requires a calibrated square-pose table, and the orchestration layer maps selected moves to source and destination poses. In the simplest form, a move such as `e2e4` is executed by moving to the calibrated `e2` pose and then to the calibrated `e4` pose.
 
@@ -242,7 +264,7 @@ The backend was written in Python. It used `FastAPI` for the web API, `python-ch
 
 The frontend was built with React and Vite. It used `chess.js` and `react-chessboard` for the interactive chessboard, and `three.js`, `@react-three/fiber`, and `@react-three/drei` for the rendered 3D chessboard view. Playwright was used for automated benchmark image capture.
 
-The robotic manipulation side used Cobot Magic/Piper ROS tooling. The final design used calibrated square poses and ROS joint publishing rather than relying on a single general prompt-following robot model.
+The physical platform was a **Cobot Magic** system in a Mobile ALOHA configuration, equipped with dual **Agilex Piper** arms. Three **Intel RealSense** cameras provided visual input: one mounted on the left wrist, one on the right wrist, and one providing a top-down view of the board. Model training and inference were performed on a high-speed workstation with an **NVIDIA RTX 4090** GPU.
 
 ## Benchmark Methodology
 
@@ -303,8 +325,8 @@ This correction is important because the benchmark should measure whether a visi
 
 | Model | Successful call rate | Exact move accuracy | Exact piece placement accuracy | Legal SAN rate | Legal after-placement rate | Average runtime, successful calls only |
 |---|---:|---:|---:|---:|---:|---:|
-| `Qwen/Qwen3-VL-30B-A3B-Instruct` | 10% | 0% | 0% | 10% | 10% | 3.43 s |
-| `Qwen/Qwen2.5-VL-72B-Instruct` | 62% | 2% | 2% | 62% | 62% | 5.33 s |
+| `Qwen3-VL-30B-A3B` | 10% | 0% | 0% | 10% | 10% | 3.43 s |
+| `Qwen2.5-VL-72B` | 62% | 2% | 2% | 62% | 62% | 5.33 s |
 | `gpt-5.3-chat` | 98% | 42% | 42% | 98% | 98% | 37.85 s |
 | `gpt-4o` | 64% | 4% | 4% | 60% | 64% | 9.04 s |
 
@@ -312,17 +334,12 @@ This correction is important because the benchmark should measure whether a visi
 
 The following figures were generated from `benchmark_models.ipynb` using the saved benchmark artefacts.
 
-![Vision model accuracy comparison](report_assets/vision_accuracy_comparison.png)
+![Exact move and exact piece-placement accuracy, shown against external benchmark context from the notebook.](report_assets/vision_accuracy_comparison.png){ width=95% }
 
-**Figure 1.** Exact move and exact piece-placement accuracy, shown against external benchmark context from the notebook.
+![Whether the predicted SAN and predicted after-piece placement agreed with each other.](report_assets/vision_san_placement_consistency.png){ width=95% }
 
-![SAN and piece-placement consistency](report_assets/vision_san_placement_consistency.png)
+![Mean model confidence split by whether the exact move prediction was correct.](report_assets/vision_confidence_by_correctness.png){ width=95% }
 
-**Figure 2.** Whether the predicted SAN and predicted after-piece placement agreed with each other.
-
-![Mean confidence by correctness](report_assets/vision_confidence_by_correctness.png)
-
-**Figure 3.** Mean model confidence split by whether the exact move prediction was correct.
 
 ### Move-selection benchmark diagnostics
 
@@ -332,18 +349,20 @@ The notebook also summarised the move-selection benchmark stored in `data/benchm
 |---|---:|---:|---:|---:|---:|---:|
 | `gpt-5.3-chat` | 50/50 | 6% | 314.48 | 8% | 22% | 70% |
 | `gpt-4o` | 50/50 | 12% | 170.32 | 14% | 38% | 48% |
-| `Qwen/Qwen2.5-VL-72B-Instruct` | 50/50 | 4% | 257.62 | 10% | 24% | 66% |
-| `Qwen/Qwen3-VL-30B-A3B-Instruct` | 50/50 | 66% | 35.10 | 26% | 48% | 26% |
+| `Qwen2.5-VL-72B` | 50/50 | 4% | 257.62 | 10% | 24% | 66% |
+| `Qwen3-VL-30B-A3B` | 50/50 | 66% | 35.10 | 26% | 48% | 26% |
 
-![Average selected centipawn loss by model](report_assets/move_cp_loss_by_model.png)
+![Average selected centipawn loss by model in the move-selection benchmark.](report_assets/move_cp_loss_by_model.png){ width=95% }
 
-**Figure 4.** Average selected centipawn loss by model in the move-selection benchmark.
+\clearpage
 
-![Move-style distribution by model](report_assets/move_style_distribution.png)
-
-**Figure 5.** Move-style distribution for successful move-selection benchmark rows.
+![Move-style distribution for successful move-selection benchmark rows.](report_assets/move_style_distribution.png){ width=95% }
 
 ## Results Analysis
+
+### Robotic manipulation results
+No reliable robotic execution was achieved. Pi-zero was non-functional for chess manipulation despite 200 trajectories, and the diagnostic box-picking task confirmed the issue lay in the Pi-zero configuration rather than data volume. ACT proved capable of actuating the arm on the box task (2/7 success), but its inability to recover from errors indicated poor generalisation and a lack of failure-resolution training data.
+The specialised ACT approach never produced a working model. The single trained model (a7-to-a5) failed in all 10 trials. The primary failure modes were piece-level visual confusion—multiple similar-looking pawns prevented the model from grounding to the correct square—and insufficient data for spatial generalisation. Because 60 trajectories was inadequate and scaling to 200+ trajectories per model would be required for five separate behaviours, the robotic subsystem never reached the reliability needed to close the full perception–reasoning–action loop. Consequently, the complete autonomous pipeline was validated only up to the move-selection stage; physical execution remained the unclosed gap of the system. 
 
 ### `gpt-5.3-chat` performed best
 
@@ -400,12 +419,6 @@ The system would be much less reliable without `python-chess` validation. VLM ou
 
 However, deterministic validation cannot solve visual ambiguity. If the model returns the wrong legal move, the chess validator may still accept it.
 
-### Calibrated robot actions are more practical than one general model
-
-The robotic-arm work showed that a single general prompt-following action model was not the most practical approach. ACT-style training could perform some behaviours, but it struggled with failure recovery and task generalisation.
-
-Using calibrated square poses and deterministic ROS joint publishing gave the system a more controlled execution strategy. This also matched the modular design of the chess software pipeline.
-
 ## What Worked
 
 The modular architecture worked well. Separating perception, validation, chess reasoning, LLM policy selection, and robotic execution made the system easier to debug and explain.
@@ -422,7 +435,7 @@ The calibrated-executor idea worked better conceptually than direct prompt-based
 
 The direct VLM vision approach was not accurate enough for fully reliable autonomous chess play. Even the best model only achieved 42% exact move accuracy.
 
-The original robotic model-training direction also did not work as reliably as expected. The robot model could get stuck midway and was sensitive to data quality, configuration, and small deviations in object position.
+The Pi-zero VLA approach was non-functional for chess manipulation despite 200 trajectories; the diagnostic box-picking task confirmed the issue lay in Pi-zero configuration rather than data volume. ACT proved capable of actuating the arm on the box task (2/7 success), but its inability to recover from errors indicated poor generalisation and a lack of failure-resolution data. The specialised ACT approach never produced a working model—the single trained a7-to-a5 model failed in all 10 trials, primarily because it could not differentiate between visually similar pawns or localise the correct square. Because 60 trajectories was inadequate and scaling to 200+ trajectories per model for five separate behaviours was infeasible, the robotic subsystem never reached the reliability needed to close the full perception–reasoning–action loop.
 
 The earlier benchmark setup did not work as a valid evaluation because it allowed data leakage under specific circumstances. This was corrected, but it meant that the presentation results were not representative of final system performance.
 
@@ -448,13 +461,17 @@ The rendered 3D board approximated real camera input, but it did not include all
 
 A legal move is not necessarily the correct move. The benchmark showed that legality-based success metrics can overstate performance if exact move accuracy is not also reported.
 
+### VLA pipeline configuration overhead
+
+The long Pi-zero training pipeline introduced significant configuration complexity. The inability to distinguish training bugs from data insufficiency consumed substantial development time and delayed the pivot to alternative approaches.
+
 ### Robotic failure recovery remained difficult
 
 The ACT-based robotic side could perform some trained actions, but failure recovery was weak. If the robot deviated slightly from the expected state, it could struggle to recover. This is a key limitation for real autonomous manipulation.
 
-### Earlier presentation results were inaccurate
+### Imitation-learning scalability for multi-move robotics
 
-The presentation used benchmark results from a misconfigured setup that allowed data leakage under specific circumstances. Those numbers should not be treated as final results. The corrected benchmark in this report is the valid evaluation.
+Training specialised ACT models for individual chess moves would have required at least 200 trajectories per model. Collecting, cleaning, and verifying over 1,000 physical demonstrations across five distinct behaviours was infeasible within the project timeline, making the learned-manipulation approach impractical for open-ended chess play.
 
 ## Improvements Made During the Project
 
@@ -466,7 +483,7 @@ Second, the system added deterministic chess-rule validation. This prevented inv
 
 Third, the benchmark setup was corrected after identifying a data leakage issue. This made the final evaluation more grounded, even though the corrected results were less favourable.
 
-Fourth, the robotic execution design shifted from a single general VLA model to calibrated Cobot Magic execution through a hardware adapter. This made the action side more deterministic and better matched the practical behaviour of the available robotic execution methods.
+Fourth, the robotic execution design evolved through three stages: initial Pi-zero VLA fine-tuning on 200 trajectories, which failed to produce meaningful arm motion; a diagnostic shift to ACT on a box-picking task, which confirmed actuation was possible but revealed poor generalisation; an attempt at specialised ACT models (one per move), which was abandoned after the single trained a7-to-a5 model failed in all 10 trials; and finally a move to calibrated Cobot Magic execution through a hardware adapter. This progression made the action side more deterministic and better matched the practical behaviour of the available robotic execution methods.
 
 ## Future Improvements
 
@@ -511,7 +528,9 @@ The robotic subsystem would benefit from explicit recovery behaviours. For examp
 
 ## Conclusion
 
-The project implemented a complete autonomous chess system architecture connecting perception, symbolic validation, chess reasoning, LLM policy selection, and robotic execution. The software subsystem handled board-state tracking, vision-based move recognition, Stockfish-backed reasoning, LLM move selection, frontend simulation, logging, and benchmarking. The robotic subsystem explored ACT-style manipulation and used a more deterministic Cobot Magic executor when direct training was not reliable enough.
+The project implemented a complete autonomous chess system architecture connecting perception, symbolic validation, chess reasoning, LLM policy selection, and robotic execution. The software subsystem handled board-state tracking, vision-based move recognition, Stockfish-backed reasoning, LLM move selection, frontend simulation, logging, and benchmarking. 
+
+The robotic subsystem explored both Pi-zero VLA fine-tuning and specialised ACT models before settling on a deterministic Cobot Magic executor. Pi-zero failed to produce functional arm motion despite 200 trajectories, and the only trained ACT model (a7-to-a5) failed in all 10 trials. The calibrated-executor design was therefore adopted as a necessary fallback when learned manipulation proved unreliable within the available timeline.
 
 The corrected benchmark showed that perception remained the main bottleneck. `gpt-5.3-chat` achieved strong legal output rates but only 42% exact move accuracy, showing that producing a legal chess move is much easier than correctly recognising the actual move from an image.
 
